@@ -6,11 +6,11 @@
 #include "Sender.h"
 #include <DoubleResetDetector.h>      //https://github.com/khoih-prog/ESP_DoubleResetDetector
 #include <Ticker.h>
-#include "MedianFilterLib2.h"
+//#include "MedianFilterLib2.h"
 
 
 //SW name & version
-#define     VERSION                      "0.02"
+#define     VERSION                      "0.1"
 #define     SW_NAME                      "Jimka"
 
 //#define timers
@@ -77,11 +77,11 @@ static const char* const      mqtt_key                       = "hanka12";
 static const char* const      mqtt_base                      = "/home/jimka";
 
 
-int                           duration, distance;   // Duration used to calculate distance
 uint32_t                      lastRun                        = 0;
+int                           distance                       = 0;
 
 
-#define DEEPSLEEPTIMEOUT      3000e6    //60sec 
+#define DEEPSLEEPTIMEOUT      60e6    //60sec 
 
 #define MEASCOUNT             100
 

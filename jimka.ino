@@ -42,7 +42,7 @@ PubSubClient client(espClient);
 
 WiFiManager wifiManager;
 
-MedianFilter2<int> medianFilter2(MEASCOUNT);
+//MedianFilter2<int> medianFilter2(MEASCOUNT);
 
 /////////////////////////////////////////////   S  E  T  U  P   ////////////////////////////////////
 void setup(void) {
@@ -136,32 +136,35 @@ void setup(void) {
  
 /////////////////////////////////////////////   L  O  O  P   ///////////////////////////////////////
 void loop(void) {
-  /* The following TRIGPIN/ECHOPIN cycle is used to determine the
-  distance of the nearest object by bouncing soundwaves off of it. */
-  //for (uint8_t i = 0; i<MEASCOUNT; i++) {
-    digitalWrite(TRIGPIN, LOW);
-    delayMicroseconds(2);
-    digitalWrite(TRIGPIN, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(TRIGPIN, LOW);
-    //int pulse = pulseIn(ECHOPIN, HIGH);
-    //DEBUG_PRINTLN(pulse);
-    //medianFilter2.AddValue(pulse);
-  //}
-  //Calculate the distance (in cm) based on the speed of sound.
-  // distance = medianFilter2.GetFiltered();
-  // DEBUG_PRINT("Median: ");
-  // DEBUG_PRINTLN(distance);
-  
-  distance = pulseIn(ECHOPIN, HIGH);
-  distance = distance / 58.2;
+  /* signál (PING) se pouští jako HIGH na 2 mikrosekundy nebo více */
+  /* ještě před signálem dáme krátký puls LOW pro čistý následující HIGH */
+  // The PING))) is triggered by a HIGH pulse of 2 or more microseconds.
+  // Give a short LOW pulse beforehand to ensure a clean HIGH pulse:
+  pinMode(TRIGPIN, OUTPUT);
+  digitalWrite(TRIGPIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIGPIN, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(TRIGPIN, LOW);
+   
+  long zpozdeni = pulseIn(ECHOPIN, HIGH);
+   
+  /* pomocí funkce si překonvertujeme zpoždění na délkové jednotky */
+  distance = MikrosekundyNaCentimetry(zpozdeni);
+    
   DEBUG_PRINT("Distance: ");
   DEBUG_PRINT(distance);
   DEBUG_PRINTLN(" cm");
   sendDataMQTT();
+
   DEBUG_PRINT("Sleep for ");
   DEBUG_PRINT(DEEPSLEEPTIMEOUT/1e6);
   DEBUG_PRINTLN(" sec.");
+  
+  DEBUG_PRINT("Boot time: ");
+  DEBUG_PRINT((uint16_t)(millis() - lastRun));
+  DEBUG_PRINTLN(" ms");
+  
   ESP.deepSleep(DEEPSLEEPTIMEOUT);
 }
 
@@ -176,7 +179,7 @@ void sendDataMQTT(void) {
   sender.add("IP",              WiFi.localIP().toString().c_str());
   sender.add("MAC",             WiFi.macAddress());
   sender.add("distance",        distance);
-  sender.add("bootTime",        (uint8_t)(millis() - lastRun));
+  sender.add("bootTime",        (uint16_t)(millis() - lastRun));
   
   
   DEBUG_PRINTLN(F("Calling MQTT"));
@@ -184,4 +187,16 @@ void sendDataMQTT(void) {
   sender.sendMQTT(mqtt_server, mqtt_port, mqtt_username, mqtt_key, mqtt_base);
   digitalWrite(BUILTIN_LED, HIGH);
   return;
+}
+
+// long MikrosekundyNaPalce(long microseconds) {
+  // /* rychlost zvuku je cca 73.746 mikrosekund na palec (1130 stop za sekundu) */
+  // /* nezapomeňte, že signál musí urazit cestu k překážce a zpět, tedy ještě vydělit dvěma! */
+  // return microseconds / 74 / 2;
+// }
+ 
+int MikrosekundyNaCentimetry(long microseconds) {
+  /* rychlost zvuku je cca 340 m/s nebo 29 mikrosekund na centimetr */
+  /* nezapomeňte, že signál musí urazit cestu k překážce a zpět, tedy ještě vydělit dvěma! */
+  return microseconds / 29 / 2;
 }
