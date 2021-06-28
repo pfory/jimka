@@ -81,7 +81,7 @@ uint32_t                      lastRun                        = 0;
 int                           distance                       = 0;
 
 
-#define DEEPSLEEPTIMEOUT      60e6    //60sec 
+#define DEEPSLEEPTIMEOUT      600e6    //600sec 
 
 #define MEASCOUNT             100
 
