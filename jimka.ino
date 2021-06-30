@@ -54,6 +54,8 @@ void setup(void) {
 
   pinMode(TRIGPIN, OUTPUT);
   pinMode(ECHOPIN, INPUT);
+  pinMode(LOADPIN, OUTPUT);
+  digitalWrite(LOADPIN, LOW);
 
   pinMode(BUILTIN_LED, OUTPUT);
   ticker.attach(1, tick);

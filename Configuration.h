@@ -94,6 +94,7 @@ int                           distance                       = 0;
 //#define ONE_WIRE_BUS_OUT                  D5 //SCK                        GPIO14
 #define TRIGPIN                             D6 //MISO                       GPIO12
 #define ECHOPIN                             D7 //MOSI                       GPIO13
+#define LOADPIN                             D2 //                           GPIO4
 //#define                                   D8 //                           GPIO15
 
 #endif
