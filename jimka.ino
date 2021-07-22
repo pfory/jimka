@@ -7,6 +7,37 @@ GIT - https://github.com/pfory/zumpa
 
 #include "Configuration.h"
 
+#ifdef NODEEPSLEEP
+auto timer = timer_create_default(); // create a timer with default settings
+Timer<> default_timer; // save as above
+#endif
+
+uint32_t      heartBeat                     = 0;
+
+#ifdef NODEEPSLEEP
+//MQTT callback
+void callback(char* topic, byte* payload, unsigned int length) {
+  char * pEnd;
+  String val =  String();
+  DEBUG_PRINT("\nMessage arrived [");
+  DEBUG_PRINT(topic);
+  DEBUG_PRINT("] ");
+  for (int i=0;i<length;i++) {
+    DEBUG_PRINT((char)payload[i]);
+    val += (char)payload[i];
+  }
+  DEBUG_PRINTLN();
+ 
+  if (strcmp(topic, (String(mqtt_base) + "/" + String(mqtt_topic_restart)).c_str())==0) {
+    DEBUG_PRINT("RESTART");
+    ESP.restart();
+  } else if (strcmp(topic, (String(mqtt_base) + "/" + String(mqtt_topic_netinfo)).c_str())==0) {
+    DEBUG_PRINT("NET INFO");
+    sendNetInfoMQTT();
+  }
+}
+#endif
+
 //for LED status
 Ticker ticker;
 
@@ -84,6 +115,7 @@ void setup(void) {
   uint8_t _reset_reason = _reset_info->reason;
   DEBUG_PRINT("Boot-Mode: ");
   DEBUG_PRINTLN(_reset_reason);
+  heartBeat = _reset_reason;
   
   /*
  REASON_DEFAULT_RST             = 0      normal startup by power on 
@@ -95,7 +127,9 @@ void setup(void) {
  REASON_EXT_SYS_RST             = 6      external system reset 
   */
   client.setServer(mqtt_server, mqtt_port);
-  //client.setCallback(callback);
+#ifdef NODEEPSLEEP  
+  client.setCallback(callback);
+#endif
 
   WiFi.printDiag(Serial);
 
@@ -104,6 +138,8 @@ void setup(void) {
     //reset and try again, or maybe put it to deep sleep
     ESP.deepSleep(DEEPSLEEPTIMEOUT);
   } 
+  
+  sendNetInfoMQTT();
 
 #ifdef ota
   ArduinoOTA.setHostname(HOSTNAMEOTA);
@@ -128,6 +164,19 @@ void setup(void) {
   ArduinoOTA.begin();
 #endif
 
+  checkForUpdates();
+
+#ifdef NODEEPSLEEP
+  timer.every(SENDSTAT_DELAY, sendStatisticMQTT);
+  timer.every(MEASSURE_DELAY, sendMeassurement);
+#endif
+
+  void * a;
+  sendStatisticMQTT(a);
+  sendMeassurement(a);
+   
+  DEBUG_PRINTLN(" Ready");
+
   ticker.detach();
   //keep LED on
   digitalWrite(BUILTIN_LED, HIGH);
@@ -139,6 +188,34 @@ void setup(void) {
  
 /////////////////////////////////////////////   L  O  O  P   ///////////////////////////////////////
 void loop(void) {
+#ifndef NODEEPSLEEP
+  DEBUG_PRINT("Sleep for ");
+  DEBUG_PRINT(DEEPSLEEPTIMEOUT/1e6);
+  DEBUG_PRINTLN(" sec.");
+  
+  DEBUG_PRINT("Boot time: ");
+  DEBUG_PRINT((uint16_t)(millis() - lastRun));
+  DEBUG_PRINTLN(" ms");
+  
+  ESP.deepSleep(DEEPSLEEPTIMEOUT);
+#else
+  timer.tick(); // tick the timer
+#ifdef ota
+  ArduinoOTA.handle();
+#endif
+  reconnect();
+  client.loop();
+#endif
+}
+
+bool sendMeassurement(void *) {
+  meassurement();
+  sendDataMQTT();
+  return true;
+}
+  
+
+void meassurement() {
   /* signál (PING) se pouští jako HIGH na 2 mikrosekundy nebo více */
   /* ještě před signálem dáme krátký puls LOW pro čistý následující HIGH */
   // The PING))) is triggered by a HIGH pulse of 2 or more microseconds.
@@ -160,22 +237,30 @@ void loop(void) {
   DEBUG_PRINT("Distance: ");
   DEBUG_PRINT(distance);
   DEBUG_PRINTLN(" cm");
-  sendDataMQTT();
-
-#ifndef NODEEPSLEEP
-  DEBUG_PRINT("Sleep for ");
-  DEBUG_PRINT(DEEPSLEEPTIMEOUT/1e6);
-  DEBUG_PRINTLN(" sec.");
-  
-  DEBUG_PRINT("Boot time: ");
-  DEBUG_PRINT((uint16_t)(millis() - lastRun));
-  DEBUG_PRINTLN(" ms");
-  
-  ESP.deepSleep(DEEPSLEEPTIMEOUT);
-#else
-  delay(5000);
-#endif
 }
+
+bool sendStatisticMQTT(void *) {
+  digitalWrite(BUILTIN_LED, LOW);
+  //printSystemTime();
+  DEBUG_PRINTLN(F("Statistic"));
+
+  SenderClass sender;
+  sender.add("VersionSW",                     VERSION);
+  sender.add("Napeti",                        ESP.getVcc());
+#ifdef NODEEPSLEEP
+  sender.add("HeartBeat",                     heartBeat++);
+  if (heartBeat % 10 == 0) sender.add("RSSI", WiFi.RSSI());
+#else
+  sender.add("RSSI", WiFi.RSSI());
+#endif
+  
+  DEBUG_PRINTLN(F("Calling MQTT"));
+  
+  sender.sendMQTT(mqtt_server, mqtt_port, mqtt_username, mqtt_key, mqtt_base);
+  digitalWrite(BUILTIN_LED, HIGH);
+  return true;
+}
+
 
 void sendDataMQTT(void) {
   digitalWrite(BUILTIN_LED, LOW);
@@ -183,21 +268,46 @@ void sendDataMQTT(void) {
   DEBUG_PRINTLN(F("Data"));
 
   SenderClass sender;
-  sender.add("Version",         VERSION);
-  sender.add("Napeti",          ESP.getVcc());
-  sender.add("IP",              WiFi.localIP().toString().c_str());
-  sender.add("MAC",             WiFi.macAddress());
   sender.add("distance",        distance);
 #ifndef NODEEPSLEEP  
   sender.add("bootTime",        (uint16_t)(millis() - lastRun));
 #endif
-  
   
   DEBUG_PRINTLN(F("Calling MQTT"));
   
   sender.sendMQTT(mqtt_server, mqtt_port, mqtt_username, mqtt_key, mqtt_base);
   digitalWrite(BUILTIN_LED, HIGH);
   return;
+}
+
+void sendNetInfoMQTT() {
+  //printSystemTime();
+  DEBUG_PRINTLN(F("Net info"));
+
+  SenderClass sender;
+  sender.add("IP",                            WiFi.localIP().toString().c_str());
+  sender.add("MAC",                           WiFi.macAddress());
+  
+  DEBUG_PRINTLN(F("Calling MQTT"));
+  
+  sender.sendMQTT(mqtt_server, mqtt_port, mqtt_username, mqtt_key, mqtt_base);
+  return;
+}
+
+void update_started() {
+  DEBUG_PRINTLN("CALLBACK:  HTTP update process started");
+}
+
+void update_finished() {
+  DEBUG_PRINTLN("CALLBACK:  HTTP update process finished, REBOOT...");
+}
+
+void update_progress(int cur, int total) {
+  Serial.printf("CALLBACK:  HTTP update process at %d of %d bytes...\n", cur, total);
+}
+
+void update_error(int err) {
+  Serial.printf("CALLBACK:  HTTP update fatal error code %d\n", err);
 }
 
 // long MikrosekundyNaPalce(long microseconds) {
@@ -218,43 +328,81 @@ void checkForUpdates() {
   fwURL.concat("jimka");
   String fwVersionURL = fwURL;
   fwVersionURL.concat( ".version" );
+  //DEBUG_PRINT("Cesta k souboru s verzi:");
+  //DEBUG_PRINTLN(fwVersionURL);
   
   HTTPClient httpClient;
-  //httpClient.begin( fwVersionURL );
+  httpClient.begin(espClient, fwVersionURL );
   int httpCode = httpClient.GET();
-  if( httpCode == 200 ) {
+  if (httpCode == 200) {
     String newFWVersion = httpClient.getString();
 
     DEBUG_PRINT( "Current firmware version: " );
-    DEBUG_PRINTLN( FW_VERSION );
+    DEBUG_PRINTLN(VERSION);
     DEBUG_PRINT( "Available firmware version: " );
-    DEBUG_PRINTLN( newFWVersion );
+    DEBUG_PRINTLN(newFWVersion);
 
-    int newVersion = newFWVersion.toInt();
+    float newVersion = newFWVersion.toFloat();
+    String oldVersionS = VERSION;
+    float oldVersion = ((String)VERSION).toFloat();
     
-    if( newVersion > FW_VERSION ) {
-    DEBUG_PRINTLN( "Preparing to update." );
+    if (newVersion > oldVersion) {
+      DEBUG_PRINTLN( "Preparing to update." );
 
-    String fwImageURL = fwURL;
-    fwImageURL.concat( ".bin" );
-    
-    t_httpUpdate_return ret = ESPhttpUpdate.update(espClient, fwImageURL);
-  //  t_httpUpdate_return ret = ESPhttpUpdate.update( fwImageURL );
-    switch(ret) {
-          case HTTP_UPDATE_FAILED:
-            Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
-            break;
+      String fwImageURL = fwURL;
+      DEBUG_PRINTLN(fwImageURL);
+      fwImageURL.concat( ".bin" );
+      DEBUG_PRINTLN(fwImageURL);
+      
+      // The line below is optional. It can be used to blink the LED on the board during flashing
+      // The LED will be on during download of one buffer of data from the network. The LED will
+      // be off during writing that buffer to flash
+      // On a good connection the LED should flash regularly. On a bad connection the LED will be
+      // on much longer than it will be off. Other pins than LED_BUILTIN may be used. The second
+      // value is used to put the LED on. If the LED is on with HIGH, that value should be passed
+      ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
 
-          case HTTP_UPDATE_NO_UPDATES:
-            Serial.println("HTTP_UPDATE_NO_UPDATES");
-            break;
-        }
-  } else {
-      Serial.println( "Already on latest version" );
+      // Add optional callback notifiers
+      ESPhttpUpdate.onStart(update_started);
+      ESPhttpUpdate.onEnd(update_finished);
+      ESPhttpUpdate.onProgress(update_progress);
+      ESPhttpUpdate.onError(update_error);
+      
+      t_httpUpdate_return ret = ESPhttpUpdate.update(espClient, fwImageURL);
+      DEBUG_PRINTLN(ret);
+      switch(ret) {
+        case HTTP_UPDATE_FAILED:
+          Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+          break;
+
+        case HTTP_UPDATE_NO_UPDATES:
+          DEBUG_PRINTLN("HTTP_UPDATE_NO_UPDATES");
+          break;
+      }
+    } else {
+      DEBUG_PRINTLN("Already on latest version");
     }
   } else {
-    Serial.print( "Firmware version check failed, got HTTP response code " );
-    Serial.println( httpCode );
+    DEBUG_PRINT("Firmware version check failed, got HTTP response code" );
+    DEBUG_PRINTLN( httpCode );
   }
   httpClient.end();
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    if (lastConnectAttempt == 0 || lastConnectAttempt + connectDelay < millis()) {
+      DEBUG_PRINT("Attempting MQTT connection...");
+      // Attempt to connect
+      if (client.connect(mqtt_base, mqtt_username, mqtt_key)) {
+        DEBUG_PRINTLN("connected");
+        client.subscribe((String(mqtt_base) + "/#").c_str());
+      } else {
+        lastConnectAttempt = millis();
+        DEBUG_PRINT("failed, rc=");
+        DEBUG_PRINTLN(client.state());
+      }
+    }
+  }
 }

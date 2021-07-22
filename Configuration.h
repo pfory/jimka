@@ -4,19 +4,20 @@
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 #include "Sender.h"
+#include <timer.h>
 #include <DoubleResetDetector.h>      //https://github.com/khoih-prog/ESP_DoubleResetDetector
 #include <Ticker.h>
 //#include "MedianFilterLib2.h"
 
 
 //SW name & version
-#define     VERSION                      "0.21"
+#define     VERSION                      "0.33"
 #define     SW_NAME                      "Jimka"
 
 #include <ESP8266HTTPClient.h>
 #include <ESP8266httpUpdate.h>
 
-const int FW_VERSION = 1;
+//const float VERSION = 0.23;
 const char* fwUrlBase = "http://192.168.1.56/fota/";
 
 //#define timers
@@ -29,7 +30,7 @@ const char* fwUrlBase = "http://192.168.1.56/fota/";
 
 #define AUTOCONNECTPWD    "password"
 
-#define NODEEPSLEEP
+//#define NODEEPSLEEP
 
 #ifdef NODEEPSLEEP
 #define ota
@@ -72,6 +73,11 @@ HC-SR04
   #define DEBUG_PRINTF(x, y)
 #endif 
 
+#define SENDSTAT_DELAY                       60000  //poslani statistiky kazdou minutu
+#define MEASSURE_DELAY                       20000  //mereni
+
+uint32_t              connectDelay                = 30000; //30s
+uint32_t              lastConnectAttempt          = 0;  
 
 // Number of seconds after reset during which a
 // subseqent reset will be considered a double reset.
@@ -87,6 +93,10 @@ static const uint16_t         mqtt_port                      = 1883;
 static const char* const      mqtt_username                  = "datel";
 static const char* const      mqtt_key                       = "hanka12";
 static const char* const      mqtt_base                      = "/home/jimka";
+#ifdef NODEEPSLEEP
+static const char* const      mqtt_topic_restart             = "restart";
+static const char* const      mqtt_topic_netinfo             = "netinfo";
+#endif
 
 
 uint32_t                      lastRun                        = 0;
