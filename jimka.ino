@@ -53,9 +53,10 @@ void setup(void) {
   DEBUG_PRINTLN(F(VERSION));
 
   pinMode(TRIGPIN, OUTPUT);
-  pinMode(ECHOPIN, INPUT);
+  pinMode(ECHOPIN, INPUT_PULLUP);
   pinMode(LOADPIN, OUTPUT);
-  digitalWrite(LOADPIN, LOW);
+  
+  digitalWrite(ECHOPIN, HIGH);
 
   pinMode(BUILTIN_LED, OUTPUT);
   ticker.attach(1, tick);
@@ -118,11 +119,11 @@ void setup(void) {
   });
   ArduinoOTA.onError([](ota_error_t error) {
     DEBUG_PRINTF("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    if (error == OTA_AUTH_ERROR) DEBUG_PRINTLN("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) DEBUG_PRINTLN("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) DEBUG_PRINTLN("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) DEBUG_PRINTLN("Receive Failed");
+    else if (error == OTA_END_ERROR) DEBUG_PRINTLN("End Failed");
   });
   ArduinoOTA.begin();
 #endif
@@ -142,14 +143,16 @@ void loop(void) {
   /* ještě před signálem dáme krátký puls LOW pro čistý následující HIGH */
   // The PING))) is triggered by a HIGH pulse of 2 or more microseconds.
   // Give a short LOW pulse beforehand to ensure a clean HIGH pulse:
+  digitalWrite(LOADPIN, LOW);
+
   pinMode(TRIGPIN, OUTPUT);
   digitalWrite(TRIGPIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIGPIN, HIGH);
-  delayMicroseconds(5);
+  delayMicroseconds(15);
   digitalWrite(TRIGPIN, LOW);
    
-  long zpozdeni = pulseIn(ECHOPIN, HIGH);
+  long zpozdeni = pulseIn(ECHOPIN, HIGH, 26000);
    
   /* pomocí funkce si překonvertujeme zpoždění na délkové jednotky */
   distance = MikrosekundyNaCentimetry(zpozdeni);
@@ -159,6 +162,7 @@ void loop(void) {
   DEBUG_PRINTLN(" cm");
   sendDataMQTT();
 
+#ifndef NODEEPSLEEP
   DEBUG_PRINT("Sleep for ");
   DEBUG_PRINT(DEEPSLEEPTIMEOUT/1e6);
   DEBUG_PRINTLN(" sec.");
@@ -168,6 +172,9 @@ void loop(void) {
   DEBUG_PRINTLN(" ms");
   
   ESP.deepSleep(DEEPSLEEPTIMEOUT);
+#else
+  delay(5000);
+#endif
 }
 
 void sendDataMQTT(void) {
@@ -181,7 +188,9 @@ void sendDataMQTT(void) {
   sender.add("IP",              WiFi.localIP().toString().c_str());
   sender.add("MAC",             WiFi.macAddress());
   sender.add("distance",        distance);
+#ifndef NODEEPSLEEP  
   sender.add("bootTime",        (uint16_t)(millis() - lastRun));
+#endif
   
   
   DEBUG_PRINTLN(F("Calling MQTT"));
@@ -201,4 +210,51 @@ int MikrosekundyNaCentimetry(long microseconds) {
   /* rychlost zvuku je cca 340 m/s nebo 29 mikrosekund na centimetr */
   /* nezapomeňte, že signál musí urazit cestu k překážce a zpět, tedy ještě vydělit dvěma! */
   return microseconds / 29 / 2;
+}
+
+
+void checkForUpdates() {
+  String fwURL = String( fwUrlBase );
+  fwURL.concat("jimka");
+  String fwVersionURL = fwURL;
+  fwVersionURL.concat( ".version" );
+  
+  HTTPClient httpClient;
+  //httpClient.begin( fwVersionURL );
+  int httpCode = httpClient.GET();
+  if( httpCode == 200 ) {
+    String newFWVersion = httpClient.getString();
+
+    DEBUG_PRINT( "Current firmware version: " );
+    DEBUG_PRINTLN( FW_VERSION );
+    DEBUG_PRINT( "Available firmware version: " );
+    DEBUG_PRINTLN( newFWVersion );
+
+    int newVersion = newFWVersion.toInt();
+    
+    if( newVersion > FW_VERSION ) {
+    DEBUG_PRINTLN( "Preparing to update." );
+
+    String fwImageURL = fwURL;
+    fwImageURL.concat( ".bin" );
+    
+    t_httpUpdate_return ret = ESPhttpUpdate.update(espClient, fwImageURL);
+  //  t_httpUpdate_return ret = ESPhttpUpdate.update( fwImageURL );
+    switch(ret) {
+          case HTTP_UPDATE_FAILED:
+            Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+            break;
+
+          case HTTP_UPDATE_NO_UPDATES:
+            Serial.println("HTTP_UPDATE_NO_UPDATES");
+            break;
+        }
+  } else {
+      Serial.println( "Already on latest version" );
+    }
+  } else {
+    Serial.print( "Firmware version check failed, got HTTP response code " );
+    Serial.println( httpCode );
+  }
+  httpClient.end();
 }

@@ -10,8 +10,14 @@
 
 
 //SW name & version
-#define     VERSION                      "0.1"
+#define     VERSION                      "0.21"
 #define     SW_NAME                      "Jimka"
+
+#include <ESP8266HTTPClient.h>
+#include <ESP8266httpUpdate.h>
+
+const int FW_VERSION = 1;
+const char* fwUrlBase = "http://192.168.1.56/fota/";
 
 //#define timers
 #define verbose
@@ -23,7 +29,12 @@
 
 #define AUTOCONNECTPWD    "password"
 
-//#define ota
+#define NODEEPSLEEP
+
+#ifdef NODEEPSLEEP
+#define ota
+#endif
+
 #ifdef ota
 #include <ArduinoOTA.h>
 #define HOSTNAMEOTA       SW_NAME VERSION
@@ -31,6 +42,7 @@
 #else
 #define AUTOCONNECTNAME   SW_NAME VERSION
 #endif
+
 
 /*
 --------------------------------------------------------------------------------------------------------------------------
