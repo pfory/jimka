@@ -1,8 +1,8 @@
 /*
 --------------------------------------------------------------------------------------------------------------------------
-ZUMPA - mereni hladiny v jimce
+JIMKA - mereni hladiny v jimce
 Petr Fory pfory@seznam.cz
-GIT - https://github.com/pfory/zumpa
+GIT - https://github.com/pfory/jimka
 */
 
 #include "Configuration.h"
